@@ -4,9 +4,10 @@
 #include "types.h"
 #include <vector>
 
-using Map = std::vector<SquareType>;
-struct Sokoban {
-  Map map;
+class Sokoban {
+ public:
+ private:
+  
 };
 
 #endif

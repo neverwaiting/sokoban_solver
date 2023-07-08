@@ -4,20 +4,27 @@
 #include <inttypes.h>
 #include <vector>
 
-enum SquareType : uint32_t {
-  kFloor = 1 << 0,
-  kWall = 1 << 1,
-  kBox = 1 << 2,
-  kGoal = 1 << 3,
-  kPlayer = 1 << 4,
+enum SquareType : unsigned {
+  kFloor = 0,
+  kWall = 1 << 0,
+  kBox = 1 << 1,
+  kGoal = 1 << 2,
+  kPlayer = 1 << 3,
   kBoxOnGoal = kGoal | kBox,
-  kPlayerOnGoal = kGoal | kPlayer
+  kPlayerOnGoal = kGoal | kPlayer,
+  kEmpty = 1 << 4
 };
 
-struct Map {
+using Map = std::vector<SquareType>;
+
+struct Level {
   int file;
   int rank;
-  std::vector<SquareType> map;
+  Map map;
 };
+
+using LevelArray = std::vector<Level>;
+
+using Direction = int;
 
 #endif
