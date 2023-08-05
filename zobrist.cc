@@ -1,6 +1,7 @@
 #include "zobrist.h"
+#include <algorithm>
+#include <iostream>
 
-namespace sokoban {
 // RC4密码流
 RC4::RC4() : x_(0), y_(0) {
   int i = 0;
@@ -25,35 +26,43 @@ uint32_t RC4::NextLong() {
   return NextByte() + (NextByte() << 8) + (NextByte() << 16) + (NextByte() << 24);
 }
 
-Zobrist::Zobrist() : key_(0), lock1_(0), lock2_(0) {
+Zobrist::Zobrist() {
+  std::fill(keys.begin(), keys.end(), 0);
+}
+
+Zobrist::Zobrist(const Zobrist& rhs) {
+  std::copy(rhs.keys.begin(), rhs.keys.end(), keys.begin());
 }
 
 Zobrist::Zobrist(RC4& rc4) {
-  key_ = rc4.NextLong();
-  lock1_ = rc4.NextLong();
-  lock2_ = rc4.NextLong();
+  for (auto it = keys.begin(); it != keys.end(); ++it) {
+    *it = rc4.NextLong();
+  }
 }
 
 void Zobrist::Reset() {
-  key_ = lock1_ = lock2_ = 0;
+  std::fill(keys.begin(), keys.end(), 0);
 }
 
 void Zobrist::XOR(const Zobrist& rhs) {
-  key_ ^= rhs.key_;
-  lock1_ ^= rhs.lock1_;
-  lock2_ ^= rhs.lock2_;
+  auto it = keys.begin();
+  auto itr = rhs.keys.cbegin();
+  for (; it != keys.end(); ++it, ++itr) {
+    *it ^= *itr;
+  }
 }
 
-uint32_t Zobrist::key() const {
-  return key_;
+bool Zobrist::operator==(const Zobrist& rhs) const {
+  for (auto it = keys.begin(), itr = rhs.keys.cbegin();
+      it != keys.end(); ++it, ++itr) {
+  }
+  return std::equal(keys.begin(), keys.end(), rhs.keys.begin());
 }
 
-uint32_t Zobrist::lock1() const {
-  return lock1_;
+bool Zobrist::operator!=(const Zobrist& rhs) const {
+  return !operator==(rhs);
 }
 
-uint32_t Zobrist::lock2() const{
-  return lock2_;
+bool Zobrist::operator<(const Zobrist& rhs) const {
+  return keys < rhs.keys;
 }
-
-} // namespace sokoban

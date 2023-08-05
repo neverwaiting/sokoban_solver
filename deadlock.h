@@ -2,12 +2,10 @@
 #define WSUN_SOKOBAN_DEADLOCK_H_
 
 #include "types.h"
-#include "solver.h"
 #include <unordered_map>
 #include <unordered_set>
 
-namespace sokoban {
-
+struct Board;
 class DeadLock {
  public:
   // DeadLock();
@@ -22,7 +20,5 @@ class DeadLock {
   std::unordered_map<int, std::vector<int>> distanceGoals_;
   std::unordered_set<int> deadblocks_;
 };
-
-} // namespace sokoban
 
 #endif // #ifndef DEADLOCK_H

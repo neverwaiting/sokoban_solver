@@ -1,13 +1,14 @@
 #include "deadlock.h"
+#include "solver.h"
 #include "config.h"
 #include <climits>
 #include <queue>
 #include <algorithm>
 
-namespace sokoban {
-
 void DeadLock::generate(const Board& m) {
   distanceGoals_.clear();
+  kDirection[Up] = -m.file;
+  kDirection[Down] = m.file;
   for (auto goal : m.goals) {
     std::vector<int>& path = distanceGoals_[goal];
     path.resize(m.map.size(), INT_MAX);
@@ -64,4 +65,3 @@ const std::unordered_set<int>& DeadLock::deadBlocks() const {
   return deadblocks_;
 }
 
-} // namespace sokoban

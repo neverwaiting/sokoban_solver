@@ -4,7 +4,6 @@
 #include <inttypes.h>
 #include <array>
 
-namespace sokoban {
 // RC4密码流
 class RC4 {
 public:
@@ -22,19 +21,16 @@ class Zobrist {
 public:
 	Zobrist();
 	Zobrist(RC4& rc4);
-  Zobrist(const Zobrist&) = default;
+  Zobrist(const Zobrist&);
 	void Reset();
 	void XOR(const Zobrist& rhs);
-  uint32_t key() const;
-  uint32_t lock1() const;
-  uint32_t lock2() const;
+  bool operator==(const Zobrist& rhs) const;
+  bool operator!=(const Zobrist& rhs) const;
+  bool operator<(const Zobrist& rhs) const;
 
+  using Array = std::array<uint32_t, 4>;
 private:
-	uint32_t key_;
-	uint32_t lock1_;
-	uint32_t lock2_;
+  Array keys;
 };
-
-} // namespace sokoban
 
 #endif // #ifdef ZOBRIST_H_

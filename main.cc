@@ -1,11 +1,16 @@
 #include "parser.h"
 #include "solver.h"
+#include "zobrist.h"
 
 int main(int argc, char** argv) {
   LevelArray levels;
   getAllLevels(levels);
   // for (auto level : levels) printLevel(level);
-  Board board(levels[0]);
+  int levelIdx = 90;
+  if (argc > 1) {
+    levelIdx = atoi(argv[1]) - 1;
+  }
+  Board board(levels[levelIdx]);
   // std::vector<Push> pushes;
   // getPushes(board, pushes);
   // for (const auto& push : pushes) {
@@ -21,6 +26,7 @@ int main(int argc, char** argv) {
   //   board.print();
   // }
   astarSearch(board);
+
 
   return 0;
 }

@@ -2,9 +2,13 @@
 #define WSUN_SOKOBAN_SOLVER_H
 
 #include "parser.h"
+#include "zobrist.h"
+#include "deadlock.h"
 #include <queue>
 #include <memory>
 #include <cassert>
+#include <algorithm>
+#include <climits>
 
 namespace {
 
@@ -62,6 +66,9 @@ struct Board {
   int playerSolt;
   int file;
   Map map;
+  Zobrist zobrist;
+  std::vector<Zobrist> playerZobrists;
+  std::vector<Zobrist> boxZobrists;
 
   Board(const Level& level) {
     for (int i = 0; i < level.map.size(); ++i) {
@@ -74,6 +81,20 @@ struct Board {
     map = level.map;
     kDirection[Up] = -level.file;
     kDirection[Down] = level.file;
+
+    playerZobrists.resize(map.size());
+    boxZobrists.resize(map.size());
+    RC4 rc4;
+    std::for_each(playerZobrists.begin(), playerZobrists.end(), [&rc4](Zobrist& zobrist) {
+        zobrist = Zobrist(rc4);
+    });
+    std::for_each(boxZobrists.begin(), boxZobrists.end(), [&rc4](Zobrist& zobrist) {
+        zobrist = Zobrist(rc4);
+    });
+    zobrist.XOR(playerZobrists[playerSolt]);
+    for (int box : boxs) {
+      zobrist.XOR(boxZobrists[box]);
+    }
   }
 
   Board(const Board& rhs) {
@@ -82,7 +103,10 @@ struct Board {
     this->playerSolt = rhs.playerSolt;
     this->file = rhs.file;
     this->map = rhs.map;
-    assert(*this == rhs);
+  }
+
+  bool compareBoard(const Board& rhs) const {
+    return std::equal(boxs.begin(), boxs.end(), rhs.boxs.begin()) && playerSolt == rhs.playerSolt;
   }
 
   bool operator==(const Board& rhs) const {
@@ -124,6 +148,36 @@ struct Board {
         std::cout << "R";
       } else if (reach.isReachableBox(i)) {
         std::cout << "B";
+      } else {
+        std::cout << kSymbolsReverseMap.find(st)->second;
+      }
+      if (j == file - 1) std::cout << std::endl;
+      j = j == file - 1 ? 0 : j + 1;
+    }
+    std::cout << std::endl;
+  }
+
+  void print(const DeadLock& dl) const {
+    int j = 0;
+    for (int i = 0; i < map.size(); ++i) {
+      SquareType st = map[i];
+      if (dl.isDeadSolt(i)) {
+        std::cout << "X";
+      } else {
+        std::cout << kSymbolsReverseMap.find(st)->second;
+      }
+      if (j == file - 1) std::cout << std::endl;
+      j = j == file - 1 ? 0 : j + 1;
+    }
+    std::cout << std::endl;
+  }
+
+  void print(const std::vector<int>& boxReach) const {
+    int j = 0;
+    for (int i = 0; i < map.size(); ++i) {
+      SquareType st = map[i];
+      if (boxReach[i] != INT_MAX) {
+        std::cout << "O";
       } else {
         std::cout << kSymbolsReverseMap.find(st)->second;
       }
@@ -175,7 +229,7 @@ struct Push {
   void addToParent(const PushPtr& parent);
 };
 
-void calcReachableTiles(const Board& board, Reach& reach) {
+static void calcReachableTiles(const Board& board, Reach& reach) {
   reach.minReachableSolt = board.playerSolt;
   reach.tiles.resize(board.map.size(), ReachState::kUnvisited);
 
@@ -199,7 +253,7 @@ void calcReachableTiles(const Board& board, Reach& reach) {
   }
 }
 
-void getPushes(const Board& board, std::vector<Push>& pushes) {
+static void getPushes(const Board& board, std::vector<Push>& pushes) {
   Reach reach;
   calcReachableTiles(board, reach);
   for (int boxSolt : board.boxs) {
@@ -212,10 +266,10 @@ void getPushes(const Board& board, std::vector<Push>& pushes) {
       }
     }
   }
-  board.print(reach);
+  // board.print(reach);
 }
 
-double distance(int start, int end, int file) {
+static double distance(int start, int end, int file) {
   int startx = start / file;
   int starty = start % file;
   int endx = end / file;
@@ -223,7 +277,7 @@ double distance(int start, int end, int file) {
   return std::abs(startx - endx) + std::abs(starty - endy);
 }
 
-double costForManhattan(const Board& board) {
+static double costForManhattan(const Board& board) {
   const std::set<int>& goals = board.goals;
   const std::set<int>& boxs = board.boxs;
 
@@ -237,7 +291,7 @@ double costForManhattan(const Board& board) {
   return d;
 }
 
-void doPush(Board& board, const Push& push) {
+static void doPush(Board& board, const Push& push) {
   // std::cout << "do push before: " << board.playerSolt << std::endl;
   int movePlayerSolt = push.boxSolt;
   int moveBoxSolt = push.boxSolt + push.dir;
@@ -248,10 +302,15 @@ void doPush(Board& board, const Push& push) {
   board.playerSolt = movePlayerSolt;
   board.boxs.erase(push.boxSolt);
   board.boxs.insert(moveBoxSolt);
+
+  board.zobrist.XOR(board.playerZobrists[push.playerSolt]);
+  board.zobrist.XOR(board.playerZobrists[movePlayerSolt]);
+  board.zobrist.XOR(board.boxZobrists[push.boxSolt]);
+  board.zobrist.XOR(board.boxZobrists[moveBoxSolt]);
   // std::cout << "do push after: " << board.playerSolt << std::endl;
 }
 
-void undoPush(Board& board, const Push& push) {
+static void undoPush(Board& board, const Push& push) {
   // std::cout << "undo push before: " << board.playerSolt << std::endl;
   int movePlayerSolt = push.boxSolt;
   int moveBoxSolt = push.boxSolt + push.dir;
@@ -262,16 +321,23 @@ void undoPush(Board& board, const Push& push) {
   board.playerSolt = movePlayerSolt;
   board.boxs.insert(push.boxSolt);
   board.boxs.erase(moveBoxSolt);
+
+  board.zobrist.XOR(board.playerZobrists[push.playerSolt]);
+  board.zobrist.XOR(board.playerZobrists[movePlayerSolt]);
+  board.zobrist.XOR(board.boxZobrists[push.boxSolt]);
+  board.zobrist.XOR(board.boxZobrists[moveBoxSolt]);
   // std::cout << "undo push after: " << board.playerSolt << std::endl;
 }
 
-bool checkGameOver(const Board& board) {
+static bool checkGameOver(const Board& board) {
   std::set<int> temp(board.goals);
   temp.insert(board.boxs.begin(), board.boxs.end());
   return temp.size() == board.goals.size();
 }
 
-void astarSearch(Board& board) {
+static void astarSearch(Board& board) {
+  DeadLock dl;
+  dl.generate(board);
   int generateNodes = 0;
   int explorNodes = 0;
 
@@ -280,11 +346,17 @@ void astarSearch(Board& board) {
   printf("generate pushes: %lu\n", pushes.size());
   if (pushes.empty()) return;
 
+  // std::set<Zobrist> visitedZobrist;
+  // visitedZobrist.insert(board.zobrist);
+  std::vector<Board> visitedBoard;
+  visitedBoard.push_back(board);
   // printf("before people pos: %d\n", board.playerSolt);
   PriorityQueue<PushPtr, double> frontier;
+  // std::queue<PushPtr> frontier;
   for (const auto& push : pushes) {
     doPush(board, push);
     frontier.push(PushPtr(new Push(push)), costForManhattan(board));
+    // frontier.push(PushPtr(new Push(push)));
     printf("push item: %d, %d\n", push.boxSolt, push.dir);
     undoPush(board, push);
   }
@@ -292,47 +364,51 @@ void astarSearch(Board& board) {
 
   while (!frontier.empty()) {
     PushPtr push = frontier.pop();
+    // PushPtr push = frontier.front();
+    // frontier.pop();
+
     board = push->board;
     ++explorNodes;
+    if (explorNodes >= 100000) break;
+    // printf("explor nodes: %d\n", explorNodes);
     // printf("current people pos: %d, %d\n", board.playerSolt, push->boxSolt);
 
-    printf("current push: %d, %d\n", push->boxSolt, push->dir);
+    // printf("do push: %d, %d\n", push->boxSolt, push->dir);
     doPush(board, *push);
+    // board.print();
+    // if (visitedZobrist.find(board.zobrist) != visitedZobrist.end()) {
+    //   std::cout << "repeat situation" << std::endl;
+    //   continue;
+    // }
+    // visitedZobrist.insert(board.zobrist);
+    if (std::find(visitedBoard.begin(), visitedBoard.end(), board) != visitedBoard.end()) {
+      // std::cout << "repeat situation" << std::endl;
+      continue;
+    }
+    visitedBoard.push_back(board);
     // printf("current people pos: %d, %d\n", board.playerSolt, push->boxSolt);
-    assert(board != push->board);
     if (checkGameOver(board)) {
+      printf("explor nodes: %d\n", explorNodes);
       printf("find best way in Astar search, generateNodes: %d, explorNodes: %d\n", generateNodes, explorNodes);
       break;
     }
 
     std::vector<Push> pushes;
     getPushes(board, pushes);
-    printf("generate pushes: %lu\n", pushes.size());
-    if (pushes.empty()) {
-      break;
-      continue;
-    }
+    // printf("generate pushes: %lu\n", pushes.size());
     for (auto p : pushes) {
-      doPush(board, p);
+      bool isdead = dl.isDeadSolt(p.boxSolt + p.dir);
+      if (isdead) continue;
       PushPtr pushPtr(new Push(p));
-      pushPtr->addToParent(push);
-      frontier.push(push, costForManhattan(board));
-      printf("push item: %d, %d\n", push->boxSolt, push->dir);
+      // pushPtr->board.print();
+      // frontier.push(pushPtr);
+      // printf("push item: %d, %d, %d\n", p.boxSolt, p.dir, 0);
+      doPush(board, p);
+      int cost = costForManhattan(board);
       undoPush(board, p);
+      frontier.push(pushPtr, cost);
     }
-    break;
   }
-}
-
-void Push::removeFromParent(Board& board) {
-  if (--parent->children == 0) {
-    parent->removeFromParent(board);
-  }
-}
-
-void Push::addToParent(const PushPtr& parent) {
-  this->parent = parent;
-  ++this->parent->children;
 }
 
 #endif
