@@ -3,10 +3,12 @@
 #include "zobrist.h"
 
 int main(int argc, char** argv) {
+
   LevelArray levels;
   getAllLevels(levels);
   // for (auto level : levels) printLevel(level);
-  int levelIdx = 90;
+  int levelIdx = 0;
+
   if (argc > 1) {
     levelIdx = atoi(argv[1]) - 1;
   }

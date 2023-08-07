@@ -9,6 +9,7 @@
 #include <cassert>
 #include <algorithm>
 #include <climits>
+#include <chrono>
 
 namespace {
 
@@ -60,9 +61,27 @@ struct Reach {
   }
 };
 
+struct DynamicData {
+  std::set<int> boxes;
+  int playerSolt;
+  
+  bool operator<(const DynamicData& rhs) const {
+    return playerSolt == rhs.playerSolt ? boxes < rhs.boxes : playerSolt < rhs.playerSolt;
+  }
+
+  bool operator==(const DynamicData& rhs) const {
+    return playerSolt == rhs.playerSolt && boxes == rhs.boxes;
+  }
+
+  bool operator!=(const DynamicData& rhs) const {
+    return !operator==(rhs);
+  }
+
+};
+
 struct Board {
   std::set<int> goals;
-  std::set<int> boxs;
+  std::set<int> boxes;
   int playerSolt;
   int file;
   Map map;
@@ -70,11 +89,25 @@ struct Board {
   std::vector<Zobrist> playerZobrists;
   std::vector<Zobrist> boxZobrists;
 
+  void extractDynamicData(DynamicData& data) const {
+    data.boxes = boxes;
+    data.playerSolt = playerSolt;
+  }
+
+  void recoverFromData(const DynamicData& data) {
+    for (auto box : boxes) map[box] ^= SquareType::kBox;
+    for (auto box : data.boxes) map[box] |= SquareType::kBox;
+    map[playerSolt] ^= SquareType::kPlayer;
+    map[data.playerSolt] |= SquareType::kPlayer;
+    boxes = data.boxes;
+    playerSolt = data.playerSolt;
+  }
+
   Board(const Level& level) {
     for (int i = 0; i < level.map.size(); ++i) {
       SquareType st = level.map[i];
       if (st & SquareType::kGoal) goals.insert(i);
-      if (st & SquareType::kBox) boxs.insert(i);
+      if (st & SquareType::kBox) boxes.insert(i);
       if (st & SquareType::kPlayer) playerSolt = i;
     }
     file = level.file;
@@ -92,44 +125,9 @@ struct Board {
         zobrist = Zobrist(rc4);
     });
     zobrist.XOR(playerZobrists[playerSolt]);
-    for (int box : boxs) {
+    for (int box : boxes) {
       zobrist.XOR(boxZobrists[box]);
     }
-  }
-
-  Board(const Board& rhs) {
-    this->goals = std::set<int>(rhs.goals.begin(), rhs.goals.end());
-    this->boxs = std::set<int>(rhs.boxs.begin(), rhs.boxs.end());
-    this->playerSolt = rhs.playerSolt;
-    this->file = rhs.file;
-    this->map = rhs.map;
-  }
-
-  bool compareBoard(const Board& rhs) const {
-    return std::equal(boxs.begin(), boxs.end(), rhs.boxs.begin()) && playerSolt == rhs.playerSolt;
-  }
-
-  bool operator==(const Board& rhs) const {
-    if (goals.size() != rhs.goals.size()) return false;
-    for (auto it = goals.begin(), itr = rhs.goals.begin();
-         it != goals.end(); ++it, ++itr) {
-      if (*it != *itr) return false;
-    }
-    if (boxs.size() != rhs.boxs.size()) return false;
-    for (auto it = boxs.begin(), itr = rhs.boxs.begin();
-         it != boxs.end(); ++it, ++itr) {
-      if (*it != *itr) return false;
-    }
-    if (map.size() != rhs.map.size()) return false;
-    for (auto it = map.begin(), itr = rhs.map.begin();
-         it != map.end(); ++it, ++itr) {
-      if (*it != *itr) return false;
-    }
-    return playerSolt == rhs.playerSolt && file == rhs.file;
-  }
-
-  bool operator!=(const Board& rhs) const {
-    return !operator==(rhs);
   }
 
   bool isNeighborWithBox(int solt) const {
@@ -208,25 +206,18 @@ struct Push {
   Direction dir;
   int playerSolt;
 
-  int children;
-  PushPtr parent;
-  Board board;
+  DynamicData data;
 
   Push(int boxSolt, Direction dir, int playerSolt, const Board& board)
     : boxSolt(boxSolt),
       dir(dir),
-      playerSolt(playerSolt),
-      children(0),
-      parent(nullptr),
-      board(board)
+      playerSolt(playerSolt)
   {
+    board.extractDynamicData(data);
   }
 
 
   Push(const Push&) = default;
-
-  void removeFromParent(Board& board);
-  void addToParent(const PushPtr& parent);
 };
 
 static void calcReachableTiles(const Board& board, Reach& reach) {
@@ -256,13 +247,13 @@ static void calcReachableTiles(const Board& board, Reach& reach) {
 static void getPushes(const Board& board, std::vector<Push>& pushes) {
   Reach reach;
   calcReachableTiles(board, reach);
-  for (int boxSolt : board.boxs) {
+  for (int boxSolt : board.boxes) {
     for (auto dir : kDirection) {
-      int pushSolt = boxSolt + dir;
-      int destSolt = boxSolt - dir;
+      int destSolt = boxSolt + dir;
+      int pushSolt = boxSolt - dir;
       if (reach.isReachableBox(pushSolt) &&
           !(board.map[destSolt] & (kWall | kBox))) {
-        pushes.emplace_back(boxSolt, -dir, board.playerSolt, board);
+        pushes.emplace_back(boxSolt, dir, board.playerSolt, board);
       }
     }
   }
@@ -277,9 +268,9 @@ static double distance(int start, int end, int file) {
   return std::abs(startx - endx) + std::abs(starty - endy);
 }
 
-static double costForManhattan(const Board& board) {
+static double costForManhattan(const Board& board, const Push& push) {
   const std::set<int>& goals = board.goals;
-  const std::set<int>& boxs = board.boxs;
+  const std::set<int>& boxs = push.data.boxes;
 
   double d = 0;
   for (auto it_box = boxs.begin(), it_goal = goals.begin();
@@ -300,8 +291,8 @@ static void doPush(Board& board, const Push& push) {
   board.map[push.boxSolt] ^= SquareType::kBox;
   board.map[moveBoxSolt] |= SquareType::kBox;
   board.playerSolt = movePlayerSolt;
-  board.boxs.erase(push.boxSolt);
-  board.boxs.insert(moveBoxSolt);
+  board.boxes.erase(push.boxSolt);
+  board.boxes.insert(moveBoxSolt);
 
   board.zobrist.XOR(board.playerZobrists[push.playerSolt]);
   board.zobrist.XOR(board.playerZobrists[movePlayerSolt]);
@@ -319,8 +310,8 @@ static void undoPush(Board& board, const Push& push) {
   board.map[push.boxSolt] |= SquareType::kBox;
   board.map[moveBoxSolt] ^= SquareType::kBox;
   board.playerSolt = movePlayerSolt;
-  board.boxs.insert(push.boxSolt);
-  board.boxs.erase(moveBoxSolt);
+  board.boxes.insert(push.boxSolt);
+  board.boxes.erase(moveBoxSolt);
 
   board.zobrist.XOR(board.playerZobrists[push.playerSolt]);
   board.zobrist.XOR(board.playerZobrists[movePlayerSolt]);
@@ -330,12 +321,15 @@ static void undoPush(Board& board, const Push& push) {
 }
 
 static bool checkGameOver(const Board& board) {
-  std::set<int> temp(board.goals);
-  temp.insert(board.boxs.begin(), board.boxs.end());
-  return temp.size() == board.goals.size();
+  return board.goals == board.boxes;
+}
+
+static uint64_t getNowTime() {
+  return std::chrono::system_clock::now().time_since_epoch().count();
 }
 
 static void astarSearch(Board& board) {
+  uint64_t startTime = getNowTime();
   DeadLock dl;
   dl.generate(board);
   int generateNodes = 0;
@@ -343,37 +337,24 @@ static void astarSearch(Board& board) {
 
   std::vector<Push> pushes;
   getPushes(board, pushes);
-  printf("generate pushes: %lu\n", pushes.size());
   if (pushes.empty()) return;
 
-  // std::set<Zobrist> visitedZobrist;
-  // visitedZobrist.insert(board.zobrist);
-  std::vector<Board> visitedBoard;
-  visitedBoard.push_back(board);
-  // printf("before people pos: %d\n", board.playerSolt);
+  DynamicData data;
+  board.extractDynamicData(data);
+  std::set<DynamicData> visited;
+  visited.insert(data);
   PriorityQueue<PushPtr, double> frontier;
-  // std::queue<PushPtr> frontier;
   for (const auto& push : pushes) {
-    doPush(board, push);
-    frontier.push(PushPtr(new Push(push)), costForManhattan(board));
-    // frontier.push(PushPtr(new Push(push)));
-    printf("push item: %d, %d\n", push.boxSolt, push.dir);
-    undoPush(board, push);
+    ++generateNodes;
+    frontier.push(PushPtr(new Push(push)), costForManhattan(board, push));
   }
-  // printf("after people pos: %d\n", board.playerSolt);
 
   while (!frontier.empty()) {
     PushPtr push = frontier.pop();
-    // PushPtr push = frontier.front();
-    // frontier.pop();
 
-    board = push->board;
+    board.recoverFromData(push->data);
     ++explorNodes;
-    if (explorNodes >= 100000) break;
-    // printf("explor nodes: %d\n", explorNodes);
-    // printf("current people pos: %d, %d\n", board.playerSolt, push->boxSolt);
 
-    // printf("do push: %d, %d\n", push->boxSolt, push->dir);
     doPush(board, *push);
     // board.print();
     // if (visitedZobrist.find(board.zobrist) != visitedZobrist.end()) {
@@ -381,34 +362,46 @@ static void astarSearch(Board& board) {
     //   continue;
     // }
     // visitedZobrist.insert(board.zobrist);
-    if (std::find(visitedBoard.begin(), visitedBoard.end(), board) != visitedBoard.end()) {
-      // std::cout << "repeat situation" << std::endl;
+
+    DynamicData data;
+    board.extractDynamicData(data);
+    if (visited.find(data) != visited.end()) {
       continue;
     }
-    visitedBoard.push_back(board);
-    // printf("current people pos: %d, %d\n", board.playerSolt, push->boxSolt);
+
+    if (explorNodes % 100000 == 0) {
+      board.print();
+      uint64_t endTime = getNowTime();
+      printf("generateNodes: %d, explorNodes: %d, spent time: %lu ms\n", generateNodes, explorNodes, (endTime - startTime) / 1000000);
+    }
+
     if (checkGameOver(board)) {
-      printf("explor nodes: %d\n", explorNodes);
-      printf("find best way in Astar search, generateNodes: %d, explorNodes: %d\n", generateNodes, explorNodes);
       break;
     }
 
+    visited.insert(data);
+
     std::vector<Push> pushes;
     getPushes(board, pushes);
-    // printf("generate pushes: %lu\n", pushes.size());
     for (auto p : pushes) {
+      ++generateNodes;
       bool isdead = dl.isDeadSolt(p.boxSolt + p.dir);
       if (isdead) continue;
       PushPtr pushPtr(new Push(p));
-      // pushPtr->board.print();
-      // frontier.push(pushPtr);
-      // printf("push item: %d, %d, %d\n", p.boxSolt, p.dir, 0);
-      doPush(board, p);
-      int cost = costForManhattan(board);
-      undoPush(board, p);
+      int cost = costForManhattan(board, p);
       frontier.push(pushPtr, cost);
+      // board.print();
+      // printf("push item: %d, %d, %d\n", p.boxSolt, p.dir, cost);
     }
   }
+  board.print();
+  if (checkGameOver(board)) {
+    printf("find best way in Astar search\n");
+  } else {
+    printf("not find best way in Astar search\n"); 
+  }
+  uint64_t endTime = getNowTime();
+  printf("generateNodes: %d, explorNodes: %d, spent time: %lu ms, speed: %lu nodes/s\n", generateNodes, explorNodes, (endTime - startTime) / 1000000, (uint64_t)((double)explorNodes / (endTime - startTime) * 1000000000));
 }
 
 #endif
