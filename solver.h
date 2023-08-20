@@ -196,6 +196,32 @@ struct Board {
     std::cout << std::endl;
   }
 
+  void printForIcon() const {
+    int j = 0;
+    for (int i = 0; i < map.size(); ++i) {
+      SquareType st = map[i];
+      char c = kSymbolsReverseMap.find(st)->second;
+      if (c == '$') {
+        printf("%s", "📦");
+      } else if (c == '*') {
+        printf("%s", "🎁");
+      } else if (c == '@') {
+        printf("%s", "🧍");
+      } else if (c == '.') {
+        printf("%s", "🏀");
+      } else if (c == '#') {
+        printf("%s", "🌲");
+      } else if (c == '+') {
+        printf("%s", "⛹ ");
+      } else if (c == ' ') {
+        printf("  ");
+      }
+      if (j == file - 1) std::cout << std::endl;
+      j = j == file - 1 ? 0 : j + 1;
+    }
+    std::cout << std::endl;
+  }
+
 };
 
 struct Push;
@@ -328,6 +354,18 @@ static uint64_t getNowTime() {
   return std::chrono::system_clock::now().time_since_epoch().count();
 }
 
+static bool isTunnels(const Push& push, const Board& board) {
+  int playerSolt = push.boxSolt - push.dir;
+  return ((board.map[playerSolt + 1] & SquareType::kWall) &&
+          (board.map[playerSolt - 1] & SquareType::kWall) &&
+          ((board.map[push.boxSolt - 1] & SquareType::kWall) ||
+           (board.map[push.boxSolt + 1] & SquareType::kWall))) ||
+         ((board.map[playerSolt + board.file] & SquareType::kWall) &&
+          (board.map[playerSolt - board.file] & SquareType::kWall) &&
+          ((board.map[push.boxSolt - board.file] & SquareType::kWall) ||
+           (board.map[push.boxSolt + board.file] & SquareType::kWall)));
+}
+
 static void astarSearch(Board& board) {
   uint64_t startTime = getNowTime();
   DeadLock dl;
@@ -371,6 +409,7 @@ static void astarSearch(Board& board) {
 
     if (explorNodes % 100000 == 0) {
       board.print();
+      board.printForIcon();
       uint64_t endTime = getNowTime();
       printf("generateNodes: %d, explorNodes: %d, spent time: %lu ms\n", generateNodes, explorNodes, (endTime - startTime) / 1000000);
     }
@@ -383,18 +422,28 @@ static void astarSearch(Board& board) {
 
     std::vector<Push> pushes;
     getPushes(board, pushes);
+    if (pushes.size() == 1) {
+      PushPtr pushPtr(new Push(pushes.front()));
+      frontier.push(pushPtr, 0);
+      // printf("only one push\n");
+    } else {
     for (auto p : pushes) {
       ++generateNodes;
       bool isdead = dl.isDeadSolt(p.boxSolt + p.dir);
       if (isdead) continue;
       PushPtr pushPtr(new Push(p));
-      int cost = costForManhattan(board, p);
+      bool istunnel = isTunnels(p, board);
+      // if (istunnel) printf("tunnel, %d, %d\n", p.boxSolt, p.dir);
+      int cost = istunnel ? 0 : costForManhattan(board, p);
+      // int cost = costForManhattan(board, p);
       frontier.push(pushPtr, cost);
       // board.print();
       // printf("push item: %d, %d, %d\n", p.boxSolt, p.dir, cost);
     }
+    }
   }
   board.print();
+  board.printForIcon();
   if (checkGameOver(board)) {
     printf("find best way in Astar search\n");
   } else {
